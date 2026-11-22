@@ -95,7 +95,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-14
+          # macos-14 runners were retired on 2026-11-02. macos-15 is Apple Silicon.
+          - runner: macos-15
             arch: arm64
           - runner: macos-15-intel
             arch: x64
