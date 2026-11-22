@@ -75,7 +75,7 @@ func checkBackends(qemu string, env []string) error {
 		var opt, want string
 		switch ui[i] {
 		case "-display":
-			opt, want = "-display", ui[i+1]
+			opt, want = "-display", strings.Split(ui[i+1], ",")[0]
 		case "-audiodev":
 			opt, want = "-audiodev", strings.Split(ui[i+1], ",")[0]
 		default:
