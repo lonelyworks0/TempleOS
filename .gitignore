@@ -3,3 +3,11 @@
 /out/
 /Standalone/launcher/payload.zip
 /Standalone/launcher/rsrc_windows_*.syso
+
+# Native HolyC runtime build outputs
+/Native/launcher/payload.zip
+/Native/third_party/aiwnios/aiwnios
+/Native/third_party/aiwnios/HCRT2.BIN
+/Native/third_party/aiwnios/HCRT2.DBG.Z
+/Native/third_party/aiwnios/Registry.HC.Z
+/Native/third_party/aiwnios/build/

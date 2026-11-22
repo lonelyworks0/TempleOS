@@ -178,10 +178,64 @@ jobs:
           name: TempleOS-Linux-${{ matrix.arch }}
           path: out/TempleOS-Linux-${{ matrix.arch }}
 
+  linux-arm64-native:
+    name: Linux native aarch64
+    # HolyC compiled to aarch64. Independent of the QEMU disk image.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: Native/launcher/go.mod
+      - name: Install the compiler, SDL2, and a virtual display
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake pkg-config libsdl2-dev \
+            patchelf zip xvfb python3 file binutils
+      - name: Build TempleOS-Linux-arm64-native
+        run: Native/build.sh out/TempleOS-Linux-arm64-native
+      - name: Boot-test the desktop and a stock demo
+        run: |
+          set -euo pipefail
+          export SDL_VIDEODRIVER=x11
+          export SDL_AUDIODRIVER=dummy
+          file out/TempleOS-Linux-arm64-native
+          start=$(date +%s.%N)
+          xvfb-run -a \
+            out/TempleOS-Linux-arm64-native \
+            -data "$RUNNER_TEMP/data" \
+            --self-test "$RUNNER_TEMP/screen.ppm"
+          python3 -c 'import os,sys; print("self-test wall seconds %.2f" % (float(sys.argv[2])-float(sys.argv[1])))' \
+            "$start" "$(date +%s.%N)"
+          python3 Native/ppm2png.py "$RUNNER_TEMP/screen.ppm" out/native-desktop.png
+          inner=$(find "$RUNNER_TEMP/data" -type f -name templeos | head -1)
+          echo "inner runtime: $inner"
+          file "$inner"
+          readelf -h "$inner"
+          readelf -h "$inner" | grep -q 'AArch64'
+          echo "--- native HolyC benchmark ---"
+          start=$(date +%s.%N)
+          out/TempleOS-Linux-arm64-native \
+            -data "$RUNNER_TEMP/data" \
+            -c /Native/Bench.HC
+          python3 -c 'import os,sys; print("bench wall seconds %.2f" % (float(sys.argv[2])-float(sys.argv[1])))' \
+            "$start" "$(date +%s.%N)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TempleOS-Linux-arm64-native
+          path: out/TempleOS-Linux-arm64-native
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TempleOS-Linux-arm64-native-desktop
+          path: out/native-desktop.png
+
   release:
     name: Publish release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [disk, windows, macos, linux]
+    needs: [disk, windows, macos, linux, linux-arm64-native]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -198,4 +252,5 @@ jobs:
             artifacts/TempleOS-macOS-x64.dmg
             artifacts/TempleOS-Linux-x64
             artifacts/TempleOS-Linux-arm64
+            artifacts/TempleOS-Linux-arm64-native
             artifacts/TempleOS.ISO
