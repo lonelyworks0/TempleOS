@@ -1,7 +1,8 @@
 name: Standalone apps
 
-# Builds TempleOS as a double-click app for Windows (single .exe) and macOS
-# (.app in a .dmg), from this tree. See Standalone/README.md.
+# Builds TempleOS as a double-click app for Windows (single .exe), macOS
+# (.app in a .dmg) and Linux (single executable), from this tree.
+# See Standalone/README.md.
 
 on:
   push:
@@ -22,7 +23,7 @@ jobs:
       - name: Install tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends nasm qemu-system-x86 qemu-utils
+          sudo apt-get install -y --no-install-recommends nasm qemu-system-x86 qemu-system-gui qemu-utils
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
@@ -94,7 +95,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-14
+          # macos-14 runners were retired on 2026-11-02. macos-15 is Apple Silicon.
+          - runner: macos-15
             arch: arm64
           - runner: macos-15-intel
             arch: x64
@@ -124,10 +126,62 @@ jobs:
           name: TempleOS-macOS-${{ matrix.arch }}
           path: out/TempleOS-macOS-${{ matrix.arch }}.dmg
 
+  linux:
+    name: Linux app (${{ matrix.arch }})
+    needs: disk
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Ubuntu 24.04's glibc 2.39 is the oldest glibc the executable
+          # will run on. aarch64 emulates TempleOS's x86-64 PC.
+          - runner: ubuntu-24.04
+            arch: x64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: Standalone/launcher/go.mod
+      - name: Install QEMU and packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            qemu-system-x86 qemu-system-gui patchelf zip xvfb binutils
+      - uses: actions/download-artifact@v4
+        with:
+          name: TempleOS-disk
+          path: dist
+      - name: Package
+        run: |
+          mkdir -p out
+          Standalone/package/linux.sh dist/TempleOS.qcow2 out/TempleOS-Linux-${{ matrix.arch }}
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+      - name: Self-test without the distro QEMU
+        run: |
+          sudo apt-get remove -y qemu-system-x86 qemu-system-gui qemu-system-common
+          if command -v qemu-system-x86_64; then
+            echo "distro QEMU is still on PATH" >&2
+            exit 1
+          fi
+          out/TempleOS-Linux-${{ matrix.arch }} -data "$RUNNER_TEMP/data" -self-test 180s
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TempleOS-Linux-${{ matrix.arch }}
+          path: out/TempleOS-Linux-${{ matrix.arch }}
+
   release:
     name: Publish release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [disk, windows, macos]
+    needs: [disk, windows, macos, linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -142,4 +196,6 @@ jobs:
             artifacts/TempleOS-Windows-x64.exe
             artifacts/TempleOS-macOS-arm64.dmg
             artifacts/TempleOS-macOS-x64.dmg
+            artifacts/TempleOS-Linux-x64
+            artifacts/TempleOS-Linux-arm64
             artifacts/TempleOS.ISO

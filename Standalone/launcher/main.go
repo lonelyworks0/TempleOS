@@ -224,11 +224,67 @@ func findQEMU(res string) (qemu, share string, err error) {
 
 func qemuEnv(qemu string) []string {
 	env := os.Environ()
-	if runtime.GOOS == "windows" {
+	switch runtime.GOOS {
+	case "windows":
 		// Bundled DLLs live next to qemu-system-x86_64w.exe.
 		env = append(env, "PATH="+filepath.Dir(qemu)+";"+os.Getenv("PATH"))
+	case "linux":
+		// Private libraries and QEMU modules live beside the bundled
+		// binary. A system QEMU (no runtime/ directory) is left alone.
+		if lib := bundledLibDir(qemu); lib != "" {
+			env = prependEnvPath(env, "LD_LIBRARY_PATH", lib)
+			env = setEnv(env, "QEMU_MODULE_DIR", filepath.Join(lib, "qemu"))
+			// Bundled libgio must not load the host's GIO modules.
+			if gio := filepath.Join(lib, "gio-modules"); exists(gio) {
+				env = setEnv(env, "GIO_MODULE_DIR", gio)
+			}
+		}
 	}
 	return env
+}
+
+// bundledLibDir is the private library directory of a packaged QEMU
+// (runtime/bin/qemu-system-x86_64 → runtime/lib), or "" for a system binary.
+func bundledLibDir(qemu string) string {
+	bin := filepath.Dir(qemu)
+	if filepath.Base(bin) != "bin" {
+		return ""
+	}
+	rt := filepath.Dir(bin)
+	if filepath.Base(rt) != "runtime" {
+		return ""
+	}
+	lib := filepath.Join(rt, "lib")
+	if exists(lib) {
+		return lib
+	}
+	return ""
+}
+
+func prependEnvPath(env []string, key, value string) []string {
+	prefix := key + "="
+	for i, e := range env {
+		if strings.HasPrefix(e, prefix) {
+			old := e[len(prefix):]
+			if old != "" {
+				value = value + string(os.PathListSeparator) + old
+			}
+			env[i] = prefix + value
+			return env
+		}
+	}
+	return append(env, prefix+value)
+}
+
+func setEnv(env []string, key, value string) []string {
+	prefix := key + "="
+	for i, e := range env {
+		if strings.HasPrefix(e, prefix) {
+			env[i] = prefix + value
+			return env
+		}
+	}
+	return append(env, prefix+value)
 }
 
 func prepareDisk(res, dataDir string, reset bool) (string, error) {
@@ -311,6 +367,11 @@ func uiArgs(o options) []string {
 	case "darwin":
 		args = append(args, "-display", "cocoa",
 			"-audiodev", "coreaudio,id=snd0")
+	case "linux":
+		// gl=off: TempleOS is a 2D VGA guest. SDL's OpenGL path needs the
+		// host GPU driver, which the portable build does not ship.
+		args = append(args, "-display", "sdl,gl=off",
+			"-audiodev", "sdl,id=snd0")
 	default:
 		return fullscreen(o, args)
 	}
